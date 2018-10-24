@@ -47,10 +47,9 @@ void myTIM2_Init(void);
 void myEXTI_Init(void);
 
 // Your global variables...
-static uint16_t first_edge = 1;
+int debug = 0;
 
-int
-main(int argc, char* argv[])
+int main(int argc, char* argv[])
 {
 
 	trace_printf("This is Part 2 of Introductory Lab...\n");
@@ -136,7 +135,6 @@ void myEXTI_Init()
 /* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
 void TIM2_IRQHandler()
 {
-	trace_printf("\n*** Over ***\n");
 	/* Check if update interrupt flag is indeed set */
 	if ((TIM2->SR & TIM_SR_UIF) != 0)
 	{
@@ -157,29 +155,37 @@ void EXTI0_1_IRQHandler()
 	/* Check if EXTI1 interrupt pending flag is indeed set */
 	if ((EXTI->PR & EXTI_PR_PR1) != 0)
 	{
-		if(first_edge) {
-			first_edge = 0;
+//		if (first_edge) {
+//			first_edge = 0;
+		if (!(TIM2->CR1 & TIM_CR1_CEN)) {
 
 			/* Reset current timer count */
 			TIM2->CNT = (uint32_t)0x0;
+
 			/* Start the timer */
 			TIM2->CR1 = TIM_CR1_CEN;
 
 		} else {
 
 			/* Stop the timer */
-			TIM2->CR1 &= ~(TIM_CR1_CEN);
+			// TIM2->CR1 &= ~(TIM_CR1_CEN);
+			TIM2->CR1 = (uint16_t)0x0;
 
 			/* Read current timer value*/
 			uint32_t count = TIM2->CNT;
 
+			/* Calculate signal frequency and period */
 			float freq = ((float)SystemCoreClock) / count;
 			float period = 1000.0 / freq;
 
-			trace_printf("Signal Frequency: %d Hz\n", (unsigned int)freq);
-			trace_printf("Signal Period: %d ms\n\n", (unsigned int)period);
+			if(debug)
+				trace_printf("Count: %d\n", (int)count);
 
-			first_edge = 1;
+			/* Prints low due to integer truncation */
+			trace_printf("Signal Frequency: %.0f Hz\n", freq);
+			trace_printf("Signal Period: %.2f ms\n\n", period);
+
+			//first_edge = 1;
 
 		}
 
