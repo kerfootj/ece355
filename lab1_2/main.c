@@ -1,3 +1,8 @@
+//
+// This file is part of the GNU ARM Eclipse distribution.
+// Copyright (c) 2014 Liviu Ionescu.
+//
+
 // ----------------------------------------------------------------------------
 // School: University of Victoria, Canada.
 // Course: ECE 355 "Microprocessor-Based Systems".
@@ -44,7 +49,8 @@ void myEXTI_Init(void);
 // Your global variables...
 static uint16_t first_edge = 1;
 
-int main(int argc, char* argv[])
+int
+main(int argc, char* argv[])
 {
 
 	trace_printf("This is Part 2 of Introductory Lab...\n");
@@ -67,14 +73,13 @@ int main(int argc, char* argv[])
 void myGPIOA_Init()
 {
 	/* Enable clock for GPIOA peripheral */
-	// Relevant register: RCC->AHBENR
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
-	/* Configure PA1 as input */
-	GPIOA->MODER &= ~(GPIO_MODER_MODER1);
+	/* Configure PA0 as input */
+	GPIOA->MODER &= ~(GPIO_MODER_MODER0);
 
-	/* Ensure no pull-up/pull-down for PA1 */
-	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR1);
+	/* Ensure no pull-up/pull-down for PA0 */
+	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR0);
 }
 
 
@@ -85,7 +90,7 @@ void myTIM2_Init()
 
 	/* Configure TIM2: buffer auto-reload, count up, stop on overflow,
 	 * enable update events, interrupt on overflow only */
-	TIM2->CR1 = ((uint16_t) 0x008C);
+	TIM2->CR1 = ((uint16_t)0x008C);
 
 	/* Set clock prescaler value */
 	TIM2->PSC = myTIM2_PRESCALER;
@@ -94,13 +99,15 @@ void myTIM2_Init()
 	TIM2->ARR = myTIM2_PERIOD;
 
 	/* Update timer registers */
-	TIM2->EGR = ((uint16_t) 0x0001);
+	TIM2->EGR = ((uint16_t)0x0001);
 
 	/* Assign TIM2 interrupt priority = 0 in NVIC */
-	NVIC_SetPriority(TIM2_IRQn, 0);
+	// NVIC_SetPriority(TIM2_IRQn, 0);
+	NVIC->IP[3] = ((uint32_t)0x00FFFFFF);
 
 	/* Enable TIM2 interrupts in NVIC */
-	NVIC_EnableIRQ(TIM2_IRQn);
+	// NVIC_EnableIRQ(TIM2_IRQn);
+	NVIC->ISER[0] = ((uint32_t)0x00008000);
 
 	/* Enable update interrupt generation */
 	TIM2->DIER |= TIM_DIER_UIE;
@@ -129,6 +136,7 @@ void myEXTI_Init()
 /* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
 void TIM2_IRQHandler()
 {
+	trace_printf("\n*** Over ***\n");
 	/* Check if update interrupt flag is indeed set */
 	if ((TIM2->SR & TIM_SR_UIF) != 0)
 	{
