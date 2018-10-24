@@ -110,7 +110,7 @@ void myTIM2_Init()
 void myEXTI_Init()
 {
 	/* Map EXTI1 line to PA1 */
-	SYSCFG->EXTICR[0] = SYSCFG_EXTICR1_EXTI1_PA;
+	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PA;
 
 	/* EXTI1 line interrupts: set rising-edge trigger */
 	EXTI->RTSR |= EXTI_RTSR_TR1;
@@ -138,7 +138,7 @@ void TIM2_IRQHandler()
 		TIM2->SR &= ~(TIM_SR_UIF);
 
 		/* Restart stopped timer */
-		TIM2->CR1 |= TIM_CR1_CEN;
+		TIM2->CR1 = TIM_CR1_CEN;
 	}
 }
 
@@ -155,7 +155,7 @@ void EXTI0_1_IRQHandler()
 			/* Reset current timer count */
 			TIM2->CNT = (uint32_t)0x0;
 			/* Start the timer */
-			TIM2->CR1 |= TIM_CR1_CEN;
+			TIM2->CR1 = TIM_CR1_CEN;
 
 		} else {
 
