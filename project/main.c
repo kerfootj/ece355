@@ -40,20 +40,39 @@
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
 
-/* Clock prescalers: no prescaling */
+/* Clock prescalers: TIM2, TIM3, TIM6 */
 #define myTIM2_PRESCALER ((uint16_t)0x0000)
 #define myTIM3_PRESCALER ((unit16_t)0xFFFF)
+#define myTIM6_PRESCALER ((unit16_t) 4)
+
 /* Maximum possible setting for overflow */
 #define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
 
+/* ADC and DAC*/
+#define MAX_ADC_VALUE 4095 	// 12 bit ADC holds 0xFFF = 4095
+#define MAX_DAC_VALUE 4095 	// 12 bit DAC holds 0xFFF = 4095
+#define MAX_POT_VALUE 5000 	// 5k potentieomiter
+#define MAX_VOLTAGE (2.91) 	// Measred when DAC->DHR12R1 = DAC_MAX_VALUE
+#define DIODE_DROP (1.0) 	// Voltage needed to overcome diode voltage
+
 /* Prototypes */
 void myGPIOA_Init(void);
+void myGPIOB_Init(void);
 void myTIM2_Init(void);
 void myTIM3_Init(void);
+void myTIM6_Init(void);
 void myEXTI_Init(void);
+void myADC_Init(void);
+void myDAC_Init(void);
+void mySPI_Init(void);
+void myLCD_Init(void);
+void modeLCD48BIT(char data);
 void writeToHC595(char data);
 void writeToLCD(char data, int cmd_flag);
 void writeStringToLCD(char* data);
+void wait(int ms);
+float getPOTValue(void);
+unit16_t offsetDAC(float value);
 
 /* Global Variables */
 int debug = 0;
@@ -68,6 +87,7 @@ int main(int argc, char* argv[])
 	myGPIOA_Init();		/* Initialize I/O port PA */
 	myTIM2_Init();		/* Initialize timer TIM2 */
 	myTIM3_Init();		/* Initialize timer TIM3 */
+	myTIM6_Init();		/* Initialize timer TIM6 */
 	myEXTI_Init();		/* Initialize EXTI */
 
 	while (1)
@@ -152,6 +172,20 @@ void myTIM3_Init()
 }
 
 
+myTIM6_Init()
+{
+	/* Enable clock for TIM6 peripheral */
+	RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
+
+	/* Configure TIM6: buffer auto-reload */
+	TIM6->CR1 |= 0x84;
+
+	/* Set clock prescaler value */
+	TIM6->PSC = myTIM6_PRESCALER;
+
+}
+
+
 void myEXTI_Init()
 {
 	/* Map EXTI1 line to PA1 */
@@ -168,6 +202,37 @@ void myEXTI_Init()
 
 	/* Enable EXTI1 interrupts in NVIC */
 	NVIC_EnableIRQ(EXTI0_1_IRQn);
+}
+
+
+void myADC_Init()
+{
+	/* Enable ADC clock */
+	RCC->APB1ENR |= RCC_APB1ENR_ADCEN;
+
+	/* Let the ADC sef calibrate */
+	ADC1->CR |= ADC_CR_ADCAL;
+
+	/* Wait for calibration */
+	while(ADC1->CR == ADC_CR_ADCAL);
+
+	/*Configure ADC: continuous convertion, overrun mode */
+	ADC1->CFGR1 |= (ADC_CFGR1_OVRMOD | ADC_CFGR1_CONT);
+
+	/* Set ADC to channel 0 for PA0 */
+	ADC1->CHSELR |= ADC_CHSELR_CHSEL0;
+
+	/* Enable ADC */
+	ADC1->CR |= ADC_CR_ADEN;
+
+	/* Wait for satability */
+	while(!(ADC1->ISR & ADC_ISR_ADRDY));
+}
+
+
+void myDAC_Init()
+{
+	
 }
 
 
