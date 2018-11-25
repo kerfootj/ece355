@@ -42,8 +42,8 @@
 
 /* Clock prescalers: TIM2, TIM3, TIM6 */
 #define myTIM2_PRESCALER ((uint16_t)0x0000)
-#define myTIM3_PRESCALER ((unit16_t)0xFFFF)
-#define myTIM6_PRESCALER ((unit16_t) 4)
+#define myTIM3_PRESCALER ((uint16_t)0xFFFF)
+#define myTIM6_PRESCALER ((uint16_t)4)
 
 /* Maximum possible setting for overflow */
 #define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
@@ -51,8 +51,8 @@
 /* ADC and DAC*/
 #define MAX_ADC_VALUE 4095 	// 12 bit ADC holds 0xFFF = 4095
 #define MAX_DAC_VALUE 4095 	// 12 bit DAC holds 0xFFF = 4095
-#define MAX_POT_VALUE 5000 	// 5k potentieomiter
-#define MAX_VOLTAGE (2.91) 	// Measred when DAC->DHR12R1 = DAC_MAX_VALUE
+#define MAX_POT_VALUE 5000 	// 5k potentiometer
+#define MAX_VOLTAGE (2.91) 	// Measured when DAC->DHR12R1 = DAC_MAX_VALUE
 #define DIODE_DROP (1.0) 	// Voltage needed to overcome diode voltage
 
 /* Prototypes */
@@ -66,13 +66,13 @@ void myADC_Init(void);
 void myDAC_Init(void);
 void mySPI_Init(void);
 void myLCD_Init(void);
-void modeLCD48BIT(char data);
+void modeLCD4Bit(void);
 void writeToHC595(char data);
 void writeToLCD(char data, int cmd_flag);
 void writeStringToLCD(char* data);
 void wait(int ms);
 float getPOTValue(void);
-unit16_t offsetDAC(float value);
+uint16_t offsetDAC(float value);
 
 /* Global Variables */
 int debug = 0;
@@ -89,27 +89,71 @@ int main(int argc, char* argv[])
 	myTIM3_Init();		/* Initialize timer TIM3 */
 	myTIM6_Init();		/* Initialize timer TIM6 */
 	myEXTI_Init();		/* Initialize EXTI */
+	myDAC_Init();
+	myADC_Init();
+	myLCD_Init();
 
 	while (1)
 	{
-		// Nothing is going on here...
+		float x = getPOTValue();
+		global_resistance = (x/MAX_ADC_VALUE) * MAX_POT_VALUE;
+
+		uint32_t t = offsetDAC(x);
+		DAC->DHR12R1 = t;
 	}
 
 	return 0;
 
 }
 
-
+/*
+ * Configures Port A to the following:
+ * 		PA0: Input for ADC from POT
+ * 		PA1: Detect edge transitions from NE555
+ * 		PA4: Output DAC for timer control voltage
+ */
 void myGPIOA_Init()
 {
 	/* Enable clock for GPIOA peripheral */
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
-	/* Configure PA0 as input */
-	GPIOA->MODER &= ~(GPIO_MODER_MODER0);
+	/* Configure PA0 */
+	GPIOA->MODER &= ~(GPIO_MODER_MODER0); // Input
+	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR0); // Ensure no pull-up/pull-down
 
-	/* Ensure no pull-up/pull-down for PA0 */
-	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR0);
+	/* Configure PA1 */
+	GPIOA->MODER &= ~(GPIO_MODER_MODER1); // Input
+	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR1); // Ensure no pull-up/pull-down
+
+	/* Configure PA4 */
+	GPIOA->MODER &= ~(GPIO_MODER_MODER4); // Input
+	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR4); // Ensure no pull-up/pull-down
+}
+
+
+void myGPIOB_Init()
+{
+	/* Enable clock for GPIOB peripheral */
+	RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+
+	/* PB3: AF0->SPI MOSI */
+	/* PB5: AF0->SPI SCK */
+	GPIO_InitTypeDef GPIO_InitStruct;
+
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_5;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
+	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	// Configure LCK pin
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_4;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
 
 
@@ -172,7 +216,7 @@ void myTIM3_Init()
 }
 
 
-myTIM6_Init()
+void myTIM6_Init()
 {
 	/* Enable clock for TIM6 peripheral */
 	RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
@@ -182,7 +226,6 @@ myTIM6_Init()
 
 	/* Set clock prescaler value */
 	TIM6->PSC = myTIM6_PRESCALER;
-
 }
 
 
@@ -208,15 +251,15 @@ void myEXTI_Init()
 void myADC_Init()
 {
 	/* Enable ADC clock */
-	RCC->APB1ENR |= RCC_APB1ENR_ADCEN;
+	RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
-	/* Let the ADC sef calibrate */
+	/* Let the ADC self calibrate */
 	ADC1->CR |= ADC_CR_ADCAL;
 
 	/* Wait for calibration */
 	while(ADC1->CR == ADC_CR_ADCAL);
 
-	/*Configure ADC: continuous convertion, overrun mode */
+	/*Configure ADC: continuous conversion, overrun mode */
 	ADC1->CFGR1 |= (ADC_CFGR1_OVRMOD | ADC_CFGR1_CONT);
 
 	/* Set ADC to channel 0 for PA0 */
@@ -225,16 +268,109 @@ void myADC_Init()
 	/* Enable ADC */
 	ADC1->CR |= ADC_CR_ADEN;
 
-	/* Wait for satability */
+	/* Wait for stability */
 	while(!(ADC1->ISR & ADC_ISR_ADRDY));
 }
 
 
 void myDAC_Init()
 {
-	
+	/* Enable DAC clock */
+	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+
+	/* Enable DAC */
+	DAC->CR |= DAC_CR_EN1;
 }
 
+void mySPI_Init (void)
+{
+	/* Enable SPI clock */
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
+	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
+
+	/* Configure Pins */
+	GPIO_PinAFConfig(GPIOB, 3, GPIO_AF_0);
+	GPIO_PinAFConfig(GPIOB, 5, GPIO_AF_0);
+
+	/* Configure SPI1 */
+	SPI_InitTypeDef SPI_InitStructData;
+	SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructData;
+
+	 SPI_InitStruct->SPI_Direction = SPI_Direction_1Line_Tx;
+	 SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
+	 SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
+	 SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
+	 SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
+	 SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
+	 SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
+	 SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
+	 SPI_InitStruct->SPI_CRCPolynomial = 7;
+
+	 SPI_Init(SPI1, SPI_InitStruct);
+
+	 SPI_Cmd(SPI1, ENABLE);
+}
+
+
+void myLCD_Init (void)
+{
+	/*Setup Port B and SPI*/
+	myGPIOB_Init();
+	mySPI_Init();
+
+	/* 4 Bit Mode */
+	modeLCD4Bit();
+
+	/*Display 2 Lines */
+	writeToLCD(0x28, 1);
+	wait(50);
+
+	writeToLCD(0x0C, 1);
+	wait(50);
+
+	writeToLCD(0x06, 1);
+	wait(50);
+
+	/* Clear Display */
+	writeToLCD(0x01, 1);
+	wait(1550);
+}
+
+
+void modeLCD4Bit()
+{
+	/* Delays added for LCD */
+
+	writeToHC595(0x3);
+	wait(1550);
+	writeToHC595(0x3 | 0x80);
+	wait(1550);
+	writeToHC595(0x3);
+	wait(1550);
+
+	writeToHC595(0x3);
+	wait(1550);
+	writeToHC595(0x3 | 0x80);
+	wait(1550);
+	writeToHC595(0x3);
+	wait(1550);
+
+	writeToHC595(0x3);
+	wait(1550);
+	writeToHC595(0x3 | 0x80);
+	wait(1550);
+	writeToHC595(0x3);
+	wait(1550);
+
+	writeToHC595(0x2);
+	wait(1550);
+	writeToHC595(0x2 | 0x80);
+	wait(1550);
+	writeToHC595(0x2);
+	wait(1550);
+
+
+}
 
 /* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
 void TIM2_IRQHandler()
@@ -270,8 +406,10 @@ void TIM3_IRQHandler()
 		writeToLCD(0x80, 1);
 
 		// write frequency value
+		writeStringToLCD(freq);
 
 		// write resistance value
+		writeStringToLCD(rest);
 
 		/* Clear update interrupt flag */
 		TIM3->SR &= ~(TIM_SR_UIF);
@@ -329,6 +467,40 @@ void EXTI0_1_IRQHandler()
 }
 
 
+float getPOTValue()
+{
+	/* Start ADC conversion */
+	ADC1->CR |= ADC_CR_ADSTART;
+
+	/* Wait for conversion */
+	while(!(ADC1->ISR & ADC_ISR_EOC));
+
+	/* Reset conversion flag */
+	ADC1->ISR &= ~(ADC_ISR_EOC);
+
+	/* Data mask bit to obtain ADC data */
+	uint32_t value = (ADC1->DR) & ADC_DR_DATA;
+
+	return ((float)value);
+}
+
+
+uint16_t offsetDAC(float value)
+{
+	/* Map the DAC value to a voltage range */
+	float normalizedDAC = value / MAX_DAC_VALUE;
+	float outputVoltageRange = MAX_VOLTAGE - DIODE_DROP;
+	float outputVoltage = (normalizedDAC * outputVoltageRange) + DIODE_DROP;
+
+	/* Convert voltage back to a DAC level */
+	float normOutputVoltage = outputVoltage / MAX_VOLTAGE;
+	float outputDACValue = normOutputVoltage * MAX_DAC_VALUE;
+
+	return ((uint16_t) outputDACValue);
+
+}
+
+
 void writeToHC595(char data)
 {
 	// Force LCK clock to zero
@@ -374,6 +546,22 @@ void writeStringToLCD(char* data)
 	{
 		writeToLCD(data[n], 0);
 	}
+}
+
+
+void wait(int ms)
+{
+	TIM6->ARR = 12 * ms;
+
+	TIM6->CNT = 0;
+
+	TIM6->CR1 |= 0x1;
+
+	TIM6->SR = 0;
+
+	while((TIM6->SR & 0x1) == 0);
+
+	TIM6->CR1 &= 0xFFFE;
 }
 
 
