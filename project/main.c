@@ -1,16 +1,18 @@
+// ----------------------------------------------------------------------------
+// School: 	University of Victoria, Canada.
+// Course: 	ECE 355 "Microprocessor-Based Systems"
 //
-// This file is part of the GNU ARM Eclipse distribution.
-// Copyright (c) 2014 Liviu Ionescu.
+// Author: 	Joel Kerfoot
+// Date:	November 25, 2018	
 //
+// See "system/include/cmsis/stm32f0xx.h" for register/bit definitions
+// See "system/src/cmsis/vectors_stm32f0xx.c" for handler declarations
+// ----------------------------------------------------------------------------
 
-// ----------------------------------------------------------------------------
-// School: University of Victoria, Canada.
-// Course: ECE 355 "Microprocessor-Based Systems".
-// This is template code for Part 2 of Introductory Lab.
-//
-// See "system/include/cmsis/stm32f0xx.h" for register/bit definitions.
-// See "system/src/cmsis/vectors_stm32f0xx.c" for handler declarations.
-// ----------------------------------------------------------------------------
+
+/******************************************************************************
+ * 									LIBRARIES								  *
+ ******************************************************************************/
 
 #include <stdio.h>
 #include "diag/Trace.h"
@@ -19,34 +21,28 @@
 #include "stm32f0xx_rcc.h"
 #include "stm32f0xx_spi.h"
 
-// ----------------------------------------------------------------------------
-//
-// STM32F0 empty sample (trace via $(trace)).
-//
-// Trace support is enabled by adding the TRACE macro definition.
-// By default the trace messages are forwarded to the $(trace) output,
-// but can be rerouted to any device or completely suppressed, by
-// changing the definitions required in system/src/diag/trace_impl.c
-// (currently OS_USE_TRACE_ITM, OS_USE_TRACE_SEMIHOSTING_DEBUG/_STDOUT).
-//
 
-// ----- main() ---------------------------------------------------------------
+/******************************************************************************
+ * 									PRAGMATICS								  *
+ ******************************************************************************/
 
-// Sample pragmas to cope with warnings. Please note the related line at
-// the end of this function, used to pop the compiler diagnostics status.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
 
+/******************************************************************************
+ * 									  DEFINES								  *
+ ******************************************************************************/
+
 /* Clock prescalers: TIM2, TIM3, TIM6 */
-#define myTIM2_PRESCALER ((uint16_t)0x0000)
-#define myTIM3_PRESCALER ((uint16_t)0xFFFF)
-#define myTIM6_PRESCALER ((uint16_t)4)
+#define TIM2_PRESCALER ((uint16_t)0x0000)
+#define TIM3_PRESCALER ((uint16_t)0xFFFF)
+#define TIM6_PRESCALER ((uint16_t)4)
 
 /* Maximum possible setting for overflow */
-#define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
+#define TIM2_PERIOD ((uint32_t)0xFFFFFFFF)
 
 /* ADC and DAC*/
 #define MAX_ADC_VALUE 4095 	// 12 bit ADC holds 0xFFF = 4095
@@ -55,18 +51,22 @@
 #define MAX_VOLTAGE (2.91) 	// Measured when DAC->DHR12R1 = DAC_MAX_VALUE
 #define DIODE_DROP (1.0) 	// Voltage needed to overcome diode voltage
 
-/* Prototypes */
-void myGPIOA_Init(void);
-void myGPIOB_Init(void);
-void myTIM2_Init(void);
-void myTIM3_Init(void);
-void myTIM6_Init(void);
-void myEXTI_Init(void);
-void myADC_Init(void);
-void myDAC_Init(void);
-void mySPI_Init(void);
-void myLCD_Init(void);
-void modeLCD4Bit(void);
+
+/******************************************************************************
+ * 									 PROTOTYPES							  	  *
+ ******************************************************************************/
+
+void GPIOA_Init(void);
+void GPIOB_Init(void);
+void TIM2_Init(void);
+void TIM3_Init(void);
+void TIM6_Init(void);
+void EXTI_Init(void);
+void ADC_Init(void);
+void DAC_Init(void);
+void SPI_Init(void);
+void LCD_Init(void);
+void LCD_4_Bit_mode(void);
 void writeToHC595(char data);
 void writeToLCD(char data, int cmd_flag);
 void writeStringToLCD(char* data);
@@ -74,32 +74,60 @@ void wait(int ms);
 float getPOTValue(void);
 uint16_t offsetDAC(float value);
 
-/* Global Variables */
+
+/******************************************************************************
+ * 								   GLOBAL VARIABLES							  *
+ ******************************************************************************/
+
 int debug = 0;
 int global_frequency = 0;
 int global_resistance = 0;
+
+
+/******************************************************************************
+ * 								     IMPLEMENTATION						  	  *
+ ******************************************************************************/
 
 int main(int argc, char* argv[])
 {
 	trace_printf("This is the final project for ECE 355\n");
 	trace_printf("System clock: %u Hz\n", SystemCoreClock);
 
-	myGPIOA_Init();		/* Initialize I/O port PA */
-	myTIM2_Init();		/* Initialize timer TIM2 */
-	myTIM3_Init();		/* Initialize timer TIM3 */
-	myTIM6_Init();		/* Initialize timer TIM6 */
-	myEXTI_Init();		/* Initialize EXTI */
-	myDAC_Init();
-	myADC_Init();
-	myLCD_Init();
+	if (debug) { trace_printf("Initializing GPIOA...\n"); }
+	GPIOA_Init();		/* Initialize I/O port PA */
 
+	if (debug) { trace_printf("Initializing TIM2...\n"); }
+	TIM2_Init();		/* Initialize timer TIM2 */
+
+	if (debug) { trace_printf("Initializing TIM3...\n"); }
+	TIM3_Init();		/* Initialize timer TIM3 */
+
+	if (debug) { trace_printf("Initializing TIM6...\n"); }
+	TIM6_Init();		/* Initialize timer TIM6 */
+
+	if (debug) { trace_printf("Initializing EXTI...\n"); }
+	EXTI_Init();		/* Initialize EXTI */
+
+	if (debug) { trace_printf("Initializing DAC...\n"); }
+	DAC_Init();			/* Initialize DAC */
+
+	if (debug) { trace_printf("Initializing ADC...\n"); }
+	ADC_Init();			/* Initialize ADC */
+
+	if (debug) { trace_printf("Initializing LCD...\n"); }
+	LCD_Init();			/* Initialize LCD */
+
+
+	if (debug) { trace_printf("Initialization Complete\n\n"); }
 	while (1)
-	{
-		float x = getPOTValue();
+	{	
+		if (debug) { trace_printf("Getting POT Value...\n"); }
+		float resistance_value = getPOTValue();
 		global_resistance = (x/MAX_ADC_VALUE) * MAX_POT_VALUE;
 
-		uint32_t t = offsetDAC(x);
-		DAC->DHR12R1 = t;
+		if (debug) { trace_printf("Applying DAC offset\n"); }
+		uint32_t control = offsetDAC(x);
+		DAC->DHR12R1 = control;
 	}
 
 	return 0;
@@ -112,7 +140,7 @@ int main(int argc, char* argv[])
  * 		PA1: Detect edge transitions from NE555
  * 		PA4: Output DAC for timer control voltage
  */
-void myGPIOA_Init()
+void GPIOA_Init()
 {
 	/* Enable clock for GPIOA peripheral */
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
@@ -126,20 +154,19 @@ void myGPIOA_Init()
 	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR1); // Ensure no pull-up/pull-down
 
 	/* Configure PA4 */
-	GPIOA->MODER &= ~(GPIO_MODER_MODER4); // Input
+	GPIOA->MODER &= ~(GPIO_MODER_MODER4); // Output
 	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR4); // Ensure no pull-up/pull-down
 }
 
 
-void myGPIOB_Init()
+void GPIOB_Init()
 {
 	/* Enable clock for GPIOB peripheral */
 	RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
 
-	/* PB3: AF0->SPI MOSI */
-	/* PB5: AF0->SPI SCK */
 	GPIO_InitTypeDef GPIO_InitStruct;
 
+	/* Configure MOSI and SCK pins PB3, PB5 */
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_5;
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
@@ -147,7 +174,7 @@ void myGPIOB_Init()
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
 	GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	// Configure LCK pin
+	/* Configure LCK pin PB4 */
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_4;
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
@@ -157,7 +184,8 @@ void myGPIOB_Init()
 }
 
 
-void myTIM2_Init()
+/* Frequency Timer */
+void TIM2_Init()
 {
 	/* Enable clock for TIM2 peripheral */
 	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
@@ -167,15 +195,15 @@ void myTIM2_Init()
 	TIM2->CR1 = ((uint16_t)0x008C);
 
 	/* Set clock prescaler value */
-	TIM2->PSC = myTIM2_PRESCALER;
+	TIM2->PSC = TIM2_PRESCALER;
 
 	/* Set auto-reloaded delay */
-	TIM2->ARR = myTIM2_PERIOD;
+	TIM2->ARR = TIM2_PERIOD;
 
 	/* Update timer registers */
 	TIM2->EGR = ((uint16_t)0x0001);
 
-	/* Assign TIM2 interrupt priority = 0 in NVIC */
+	/* Assign TIM2 interrupt priority 0 in NVIC */
 	NVIC_SetPriority(TIM2_IRQn, 0);
 
 	/* Enable TIM2 interrupts in NVIC */
@@ -186,23 +214,27 @@ void myTIM2_Init()
 }
 
 
-// Refresh Display Timer
-void myTIM3_Init()
+/* Refresh Display Timer */
+void TIM3_Init()
 {
 	/* Enable clock for TIM3 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+	RCC->APB1ENR |= RCC_APB1ENR_TIM3RST;
 
 	/* Configure TIM3: buffer auto-reload, count up, stop on overflow,
-	 * enable update events, interrupt on overflow only */
-	TIM3->CR1 = ((uint16_t)0x008C);
+	 * enable update events, interrupt on underflow only */
+	TIM3->CR1 &= 0xFFFD;
+	TIM3->CR1 |= 0x9D;
 
 	/* Set clock prescaler value */
-	TIM3->PSC = myTIM2_PRESCALER;
+	TIM3->PSC = TIM3_PRESCALER;
+
+	/* Set timer count*/
+	TIM->CNT = SystemCoreClock / TIM3_PRESCALER;
 
 	/* Update timer registers */
-	TIM3->EGR = ((uint16_t)0x0001);
+	TIM3->EGR |= 0x1;
 
-	/* Assign TIM interrupt priority = 0 in NVIC */
+	/* Assign TIM interrupt priority 0 in NVIC */
 	NVIC_SetPriority(TIM3_IRQn, 0);
 
 	/* Enable TIM3 interrupts in NVIC */
@@ -212,24 +244,26 @@ void myTIM3_Init()
 	TIM3->DIER |= TIM_DIER_UIE;
 
 	/* Start the timer*/
-	TIM3->CR1 = TIM_CR1_CEN;
+	//TIM3->CR1 = TIM_CR1_CEN;
+	TIM3->CR1 = 0x1;
 }
 
 
-void myTIM6_Init()
+/* Wait timer */
+void TIM6_Init()
 {
 	/* Enable clock for TIM6 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
+	RCC->APB1ENR |= RCC_APB1ENR_TIM6RST;
 
 	/* Configure TIM6: buffer auto-reload */
 	TIM6->CR1 |= 0x84;
 
 	/* Set clock prescaler value */
-	TIM6->PSC = myTIM6_PRESCALER;
+	TIM6->PSC = TIM6_PRESCALER;
 }
 
 
-void myEXTI_Init()
+void EXTI_Init()
 {
 	/* Map EXTI1 line to PA1 */
 	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PA;
@@ -248,7 +282,17 @@ void myEXTI_Init()
 }
 
 
-void myADC_Init()
+void DAC_Init()
+{
+	/* Enable DAC clock */
+	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+
+	/* Enable DAC */
+	DAC->CR |= DAC_CR_EN1;
+}
+
+
+void ADC_Init()
 {
 	/* Enable ADC clock */
 	RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
@@ -273,16 +317,39 @@ void myADC_Init()
 }
 
 
-void myDAC_Init()
+void LCD_Init ()
 {
-	/* Enable DAC clock */
-	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+	/*Setup Port B and SPI*/
 
-	/* Enable DAC */
-	DAC->CR |= DAC_CR_EN1;
+	if (debug) { trace_printf("Initializing GPIOB...\n"); }
+	GPIOB_Init();
+
+	if (debug) { trace_printf("Initializing SPI...\n"); }
+	SPI_Init();
+
+	if (debug) { trace_printf("Setting 4 Bit Mode...\n"); }
+	
+	LCD_4_Bit_mode(); /* 4 Bit Mode */
+
+	/* Display 2 Lines of 8 characters */
+	writeToLCD(0x28, 1);
+	wait(50);
+
+	/* Disable Cursor */
+	writeToLCD(0x0C, 1);
+	wait(50);
+
+	/* Auto-increment address after access*/
+	writeToLCD(0x06, 1);
+	wait(50);
+
+	/* Clear Display */
+	writeToLCD(0x01, 1);
+	wait(1550);
 }
 
-void mySPI_Init (void)
+
+void SPI_Init ()
 {
 	/* Enable SPI clock */
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
@@ -293,81 +360,46 @@ void mySPI_Init (void)
 	GPIO_PinAFConfig(GPIOB, 5, GPIO_AF_0);
 
 	/* Configure SPI1 */
-	SPI_InitTypeDef SPI_InitStructData;
-	SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructData;
+	SPI_InitTypeDef SPI_InitStructInfo;
+	SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructInfo;
 
-	 SPI_InitStruct->SPI_Direction = SPI_Direction_1Line_Tx;
-	 SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
-	 SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
-	 SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
-	 SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
-	 SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
-	 SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
-	 SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
-	 SPI_InitStruct->SPI_CRCPolynomial = 7;
+	SPI_InitStruct->SPI_Direction = SPI_Direction_1Line_Tx;
+	SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
+	SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
+	SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
+	SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
+	SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
+	SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
+	SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
+	SPI_InitStruct->SPI_CRCPolynomial = 7;
 
-	 SPI_Init(SPI1, SPI_InitStruct);
+	SPI_Init(SPI1, SPI_InitStruct);
 
-	 SPI_Cmd(SPI1, ENABLE);
+	SPI_Cmd(SPI1, ENABLE);
 }
 
 
-void myLCD_Init (void)
+void LCD_4_Bit_mode()
 {
-	/*Setup Port B and SPI*/
-	myGPIOB_Init();
-	mySPI_Init();
+	/* LCD needs delay to display properly */
 
-	/* 4 Bit Mode */
-	modeLCD4Bit();
-
-	/*Display 2 Lines */
-	writeToLCD(0x28, 1);
-	wait(50);
-
-	writeToLCD(0x0C, 1);
-	wait(50);
-
-	writeToLCD(0x06, 1);
-	wait(50);
-
-	/* Clear Display */
-	writeToLCD(0x01, 1);
-	wait(1550);
-}
-
-
-void modeLCD4Bit()
-{
-	/* Delays added for LCD */
-
-	writeToHC595(0x3);
-	wait(1550);
-	writeToHC595(0x3 | 0x80);
-	wait(1550);
-	writeToHC595(0x3);
-	wait(1550);
-
-	writeToHC595(0x3);
-	wait(1550);
-	writeToHC595(0x3 | 0x80);
-	wait(1550);
-	writeToHC595(0x3);
-	wait(1550);
-
-	writeToHC595(0x3);
-	wait(1550);
-	writeToHC595(0x3 | 0x80);
-	wait(1550);
-	writeToHC595(0x3);
-	wait(1550);
+	int n;
+	for (n = 0; n < 3; n++) 
+	{
+		writeToHC595(0x3);
+		wait(1520);
+		writeToHC595(0x3 | 0x80);
+		wait(1520);
+		writeToHC595(0x3);
+		wait(1520);
+	}
 
 	writeToHC595(0x2);
-	wait(1550);
+	wait(1520);
 	writeToHC595(0x2 | 0x80);
-	wait(1550);
+	wait(1520);
 	writeToHC595(0x2);
-	wait(1550);
+	wait(1520);
 
 
 }
@@ -395,24 +427,30 @@ void TIM3_IRQHandler()
 	if ((TIM3->SR & TIM_SR_UIF) != 0)
 	{
 		// Create resistance and frequency strings
-		char freq[9];
-		char rest[9];
+		char frequency[9];
+		char resistance[9];
 
 		// Store char array in strings
-		sprintf(freq, "F:%4dHz", global_frequency);
-		sprintf(rest, "R:%4d%c", global_resistance, 0xF4);
+		sprintf(frequency, "F:%4dHz", global_frequency);
+		sprintf(resistance, "R:%4d%c", global_resistance, 0xF4);
 
-		// Move Cursor to start of line for write
+		// Move cursor to start of line for write
 		writeToLCD(0x80, 1);
 
-		// write frequency value
-		writeStringToLCD(freq);
+		// Write frequency value
+		writeStringToLCD(frequency);
 
-		// write resistance value
-		writeStringToLCD(rest);
+		// Move cursor to second line
+		writeToLCD(0xC0, 1);
+
+		// Write resistance value
+		writeStringToLCD(resistance);
 
 		/* Clear update interrupt flag */
 		TIM3->SR &= ~(TIM_SR_UIF);
+
+		/* Set clock count*/
+		TIM3->SR &= SystemCoreClock / TIM3_PRESCALER;
 
 		/* Restart stopped timer */
 		TIM3->CR1 = TIM_CR1_CEN;
@@ -426,8 +464,7 @@ void EXTI0_1_IRQHandler()
 	/* Check if EXTI1 interrupt pending flag is indeed set */
 	if ((EXTI->PR & EXTI_PR_PR1) != 0)
 	{
-//		if (first_edge) {
-//			first_edge = 0;
+		/* Timer is Disabled */
 		if (!(TIM2->CR1 & TIM_CR1_CEN)) {
 
 			/* Reset current timer count */
@@ -436,33 +473,27 @@ void EXTI0_1_IRQHandler()
 			/* Start the timer */
 			TIM2->CR1 = TIM_CR1_CEN;
 
+		/* Timer is Enabled*/
 		} else {
 
 			/* Stop the timer */
-			// TIM2->CR1 &= ~(TIM_CR1_CEN);
-			TIM2->CR1 = (uint16_t)0x0;
+			TIM2->CR1 &= ~(TIM_CR1_CEN);
 
 			/* Read current timer value*/
 			uint32_t count = TIM2->CNT;
 
 			/* Calculate signal frequency and period */
-			float freq = ((float)SystemCoreClock) / count;
-			float period = 1000.0 / freq;
+			global_frequency = ((float)SystemCoreClock) / count;
 
 			if(debug)
-				trace_printf("Count: %d\n", (int)count);
-
-			/* Prints low due to integer truncation */
-			trace_printf("Signal Frequency: %.0f Hz\n", freq);
-			trace_printf("Signal Period: %.2f ms\n\n", period);
-
-			//first_edge = 1;
-
+			{
+				trace_printf("Signal Frequency: %.0f Hz\n", global_frequency);
+				trace_printf("Signal Period: %.2f ms\n\n", global_resistance);
+			}
 		}
 
-		// 2. Clear EXTI1 interrupt pending flag (EXTI->PR).
+		/* Clear EXTI1 interrupt pending flag */
 		EXTI->PR |= EXTI_PR_PR1;
-
 	}
 }
 
@@ -523,18 +554,20 @@ void writeToHC595(char data)
 
 void writeToLCD(char data, int cmdFlag)
 {
+	/* */
 	char RS = cmdFlag ? 0x00 : 0x40;
 	char EN = 0x80;
 
-	char upper = (data & 0xF0) >> 4;
-	char lower = data & 0xF;
+	/* Serperate 8 bit data into 2 chuncks */
+	char high = (data & 0xF0) >> 4;
+	char low = data & 0xF;
 
-	writeToHC595(upper | RS);
-	writeToHC595(upper | RS | EN);
-	writeToHC595(upper | RS);
-	writeToHC595(lower | RS);
-	writeToHC595(lower | RS | EN);
-	writeToHC595(lower | RS);
+	writeToHC595(high | RS);
+	writeToHC595(high | RS | EN);
+	writeToHC595(high | RS);
+	writeToHC595(low | RS);
+	writeToHC595(low | RS | EN);
+	writeToHC595(low | RS);
 }
 
 
