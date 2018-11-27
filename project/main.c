@@ -3,7 +3,7 @@
 // Course: 	ECE 355 "Microprocessor-Based Systems"
 //
 // Author: 	Joel Kerfoot
-// Date:	November 25, 2018	
+// Date:	November 25, 2018
 //
 // See "system/include/cmsis/stm32f0xx.h" for register/bit definitions
 // See "system/src/cmsis/vectors_stm32f0xx.c" for handler declarations
@@ -56,15 +56,15 @@
  * 									 PROTOTYPES							  	  *
  ******************************************************************************/
 
-void GPIOA_Init(void);
-void GPIOB_Init(void);
-void TIM2_Init(void);
-void TIM3_Init(void);
-void TIM6_Init(void);
-void EXTI_Init(void);
-void ADC_Init(void);
-void DAC_Init(void);
-void SPI_Init(void);
+void myGPIOA_Init(void);
+void myGPIOB_Init(void);
+void myTIM2_Init(void);
+void myTIM3_Init(void);
+void myTIM6_Init(void);
+void myEXTI_Init(void);
+void myADC_Init(void);
+void myDAC_Init(void);
+void mySPI_Init(void);
 void LCD_Init(void);
 void LCD_4_Bit_mode(void);
 void writeToHC595(char data);
@@ -80,6 +80,7 @@ uint16_t offsetDAC(float value);
  ******************************************************************************/
 
 int debug = 0;
+int testFlag = 0;
 int global_frequency = 0;
 int global_resistance = 0;
 
@@ -93,45 +94,23 @@ int main(int argc, char* argv[])
 	trace_printf("This is the final project for ECE 355\n");
 	trace_printf("System clock: %u Hz\n", SystemCoreClock);
 
-	if (debug) { trace_printf("Initializing GPIOA...\n"); }
-	GPIOA_Init();		/* Initialize I/O port PA */
-
-	if (debug) { trace_printf("Initializing TIM2...\n"); }
-	TIM2_Init();		/* Initialize timer TIM2 */
-
-	if (debug) { trace_printf("Initializing TIM3...\n"); }
-	TIM3_Init();		/* Initialize timer TIM3 */
-
-	if (debug) { trace_printf("Initializing TIM6...\n"); }
-	TIM6_Init();		/* Initialize timer TIM6 */
-
-	if (debug) { trace_printf("Initializing EXTI...\n"); }
-	EXTI_Init();		/* Initialize EXTI */
-
-	if (debug) { trace_printf("Initializing DAC...\n"); }
-	DAC_Init();			/* Initialize DAC */
-
-	if (debug) { trace_printf("Initializing ADC...\n"); }
-	ADC_Init();			/* Initialize ADC */
-
-	if (debug) { trace_printf("Initializing LCD...\n"); }
+	myGPIOA_Init();		/* Initialize I/O port PA */
+	myTIM2_Init();		/* Initialize timer TIM2 */
+	myTIM3_Init();		/* Initialize timer TIM3 */
+	myTIM6_Init();		/* Initialize timer TIM6 */
+	myEXTI_Init();		/* Initialize EXTI */
+	myDAC_Init();		/* Initialize DAC */
+	myADC_Init();		/* Initialize ADC */
 	LCD_Init();			/* Initialize LCD */
 
-
-	if (debug) { trace_printf("Initialization Complete\n\n"); }
 	while (1)
-	{	
-		if (debug) { trace_printf("Getting POT Value...\n"); }
+	{
 		float resistance_value = getPOTValue();
-		global_resistance = (x/MAX_ADC_VALUE) * MAX_POT_VALUE;
-
-		if (debug) { trace_printf("Applying DAC offset\n"); }
-		uint32_t control = offsetDAC(x);
+		global_resistance = (resistance_value/MAX_ADC_VALUE) * MAX_POT_VALUE;
+		uint32_t control = offsetDAC(resistance_value);
 		DAC->DHR12R1 = control;
 	}
-
 	return 0;
-
 }
 
 /*
@@ -140,7 +119,7 @@ int main(int argc, char* argv[])
  * 		PA1: Detect edge transitions from NE555
  * 		PA4: Output DAC for timer control voltage
  */
-void GPIOA_Init()
+void myGPIOA_Init()
 {
 	/* Enable clock for GPIOA peripheral */
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
@@ -159,7 +138,7 @@ void GPIOA_Init()
 }
 
 
-void GPIOB_Init()
+void myGPIOB_Init()
 {
 	/* Enable clock for GPIOB peripheral */
 	RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
@@ -172,6 +151,7 @@ void GPIOB_Init()
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+
 	GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 	/* Configure LCK pin PB4 */
@@ -180,12 +160,13 @@ void GPIOB_Init()
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+
 	GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
 
 
 /* Frequency Timer */
-void TIM2_Init()
+void myTIM2_Init()
 {
 	/* Enable clock for TIM2 peripheral */
 	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
@@ -215,10 +196,10 @@ void TIM2_Init()
 
 
 /* Refresh Display Timer */
-void TIM3_Init()
+void myTIM3_Init()
 {
 	/* Enable clock for TIM3 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM3RST;
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM3RST;
 
 	/* Configure TIM3: buffer auto-reload, count up, stop on overflow,
 	 * enable update events, interrupt on underflow only */
@@ -228,8 +209,11 @@ void TIM3_Init()
 	/* Set clock prescaler value */
 	TIM3->PSC = TIM3_PRESCALER;
 
+	/* Set auto-reload delay*/
+	TIM3->ARR = TIM3_PRESCALER;
+
 	/* Set timer count*/
-	TIM->CNT = SystemCoreClock / TIM3_PRESCALER;
+	TIM3->CNT = SystemCoreClock / TIM3_PRESCALER;
 
 	/* Update timer registers */
 	TIM3->EGR |= 0x1;
@@ -244,16 +228,15 @@ void TIM3_Init()
 	TIM3->DIER |= TIM_DIER_UIE;
 
 	/* Start the timer*/
-	//TIM3->CR1 = TIM_CR1_CEN;
-	TIM3->CR1 = 0x1;
+	TIM3->CR1 = TIM_CR1_CEN;
 }
 
 
 /* Wait timer */
-void TIM6_Init()
+void myTIM6_Init()
 {
 	/* Enable clock for TIM6 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM6RST;
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM6RST;
 
 	/* Configure TIM6: buffer auto-reload */
 	TIM6->CR1 |= 0x84;
@@ -263,7 +246,7 @@ void TIM6_Init()
 }
 
 
-void EXTI_Init()
+void myEXTI_Init()
 {
 	/* Map EXTI1 line to PA1 */
 	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PA;
@@ -282,7 +265,7 @@ void EXTI_Init()
 }
 
 
-void DAC_Init()
+void myDAC_Init()
 {
 	/* Enable DAC clock */
 	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
@@ -292,7 +275,7 @@ void DAC_Init()
 }
 
 
-void ADC_Init()
+void myADC_Init()
 {
 	/* Enable ADC clock */
 	RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
@@ -320,28 +303,23 @@ void ADC_Init()
 void LCD_Init ()
 {
 	/*Setup Port B and SPI*/
+	myGPIOB_Init();
+	mySPI_Init();
 
-	if (debug) { trace_printf("Initializing GPIOB...\n"); }
-	GPIOB_Init();
-
-	if (debug) { trace_printf("Initializing SPI...\n"); }
-	SPI_Init();
-
-	if (debug) { trace_printf("Setting 4 Bit Mode...\n"); }
-	
-	LCD_4_Bit_mode(); /* 4 Bit Mode */
+	/* 4 Bit Mode */
+	LCD_4_Bit_mode();
 
 	/* Display 2 Lines of 8 characters */
 	writeToLCD(0x28, 1);
-	wait(50);
+	wait(37);
 
 	/* Disable Cursor */
 	writeToLCD(0x0C, 1);
-	wait(50);
+	wait(37);
 
-	/* Auto-increment address after access*/
+	/* Auto-increment address after access */
 	writeToLCD(0x06, 1);
-	wait(50);
+	wait(37);
 
 	/* Clear Display */
 	writeToLCD(0x01, 1);
@@ -349,7 +327,7 @@ void LCD_Init ()
 }
 
 
-void SPI_Init ()
+void mySPI_Init ()
 {
 	/* Enable SPI clock */
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
@@ -372,7 +350,6 @@ void SPI_Init ()
 	SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
 	SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
 	SPI_InitStruct->SPI_CRCPolynomial = 7;
-
 	SPI_Init(SPI1, SPI_InitStruct);
 
 	SPI_Cmd(SPI1, ENABLE);
@@ -382,17 +359,26 @@ void SPI_Init ()
 void LCD_4_Bit_mode()
 {
 	/* LCD needs delay to display properly */
+	writeToHC595(0x3);
+	wait(1520);
+	writeToHC595(0x3 | 0x80);
+	wait(1520);
+	writeToHC595(0x3);
+	wait(1520);
 
-	int n;
-	for (n = 0; n < 3; n++) 
-	{
-		writeToHC595(0x3);
-		wait(1520);
-		writeToHC595(0x3 | 0x80);
-		wait(1520);
-		writeToHC595(0x3);
-		wait(1520);
-	}
+	writeToHC595(0x3);
+	wait(1520);
+	writeToHC595(0x3 | 0x80);
+	wait(1520);
+	writeToHC595(0x3);
+	wait(1520);
+
+	writeToHC595(0x3);
+	wait(1520);
+	writeToHC595(0x3 | 0x80);
+	wait(1520);
+	writeToHC595(0x3);
+	wait(1520);
 
 	writeToHC595(0x2);
 	wait(1520);
@@ -433,6 +419,8 @@ void TIM3_IRQHandler()
 		// Store char array in strings
 		sprintf(frequency, "F:%4dHz", global_frequency);
 		sprintf(resistance, "R:%4d%c", global_resistance, 0xF4);
+
+		trace_printf("%s\n%s", frequency, resistance);
 
 		// Move cursor to start of line for write
 		writeToLCD(0x80, 1);
@@ -558,7 +546,7 @@ void writeToLCD(char data, int cmdFlag)
 	char RS = cmdFlag ? 0x00 : 0x40;
 	char EN = 0x80;
 
-	/* Serperate 8 bit data into 2 chuncks */
+	/* Separate 8 bit data into 2 chunks */
 	char high = (data & 0xF0) >> 4;
 	char low = data & 0xF;
 
@@ -575,7 +563,7 @@ void writeStringToLCD(char* data)
 {
 	int n;
 	// Write one char at a time
-	for(n = 0; n < strlen(data); ++n)
+	for(n = 0; n < strlen(data); n++)
 	{
 		writeToLCD(data[n], 0);
 	}
