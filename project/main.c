@@ -37,12 +37,12 @@
  ******************************************************************************/
 
 /* Clock prescalers: TIM2, TIM3, TIM6 */
-#define TIM2_PRESCALER ((uint16_t)0x0000)
-#define TIM3_PRESCALER ((uint16_t)0xFFFF)
-#define TIM6_PRESCALER ((uint16_t)4)
+#define myTIM2_PRESCALER ((uint16_t)0x0000)
+#define myTIM3_PRESCALER ((uint16_t)0xFFFF)
+#define myTIM6_PRESCALER ((uint16_t)4)
 
 /* Maximum possible setting for overflow */
-#define TIM2_PERIOD ((uint32_t)0xFFFFFFFF)
+#define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
 
 /* ADC and DAC*/
 #define MAX_ADC_VALUE 4095 	// 12 bit ADC holds 0xFFF = 4095
@@ -58,31 +58,34 @@
 
 void myGPIOA_Init(void);
 void myGPIOB_Init(void);
+void myADC_Init(void);
+void myDAC_Init(void);
 void myTIM2_Init(void);
 void myTIM3_Init(void);
 void myTIM6_Init(void);
 void myEXTI_Init(void);
-void myADC_Init(void);
-void myDAC_Init(void);
 void mySPI_Init(void);
-void LCD_Init(void);
-void LCD_4_Bit_mode(void);
-void writeToHC595(char data);
-void writeToLCD(char data, int cmd_flag);
-void writeStringToLCD(char* data);
-void wait(int ms);
-float getPOTValue(void);
-uint16_t offsetDAC(float value);
+void myLCD_Init(void);
+
+void wait(int);
+
+unsigned int convertAnalogToDigital(void);
+void convertDigitalToAnalog(unsigned int);
+int calculateResistance(unsigned int);
+
+void writeToLCD(char, int);
+void writeStringToLCD(char *);
+void sendCommandToLCD(char);
+void HC595Write(char);
+void set4BitLCDMode();
 
 
 /******************************************************************************
  * 								   GLOBAL VARIABLES							  *
  ******************************************************************************/
 
-int debug = 0;
-int testFlag = 0;
-int global_frequency = 0;
 int global_resistance = 0;
+int global_frequency = 0;
 
 
 /******************************************************************************
@@ -91,34 +94,29 @@ int global_resistance = 0;
 
 int main(int argc, char* argv[])
 {
-	trace_printf("This is the final project for ECE 355\n");
-	trace_printf("System clock: %u Hz\n", SystemCoreClock);
+	myGPIOA_Init();
+	myGPIOB_Init();
+	myTIM2_Init(); //Initialize timer used for measuring frequency
+	myEXTI_Init();
+	myADC_Init();
+	myDAC_Init();
+	mySPI_Init();
+	myTIM3_Init(); //Initialize timer used for measuring 1 second LCD print intervals
+	myTIM6_Init(); //Initialize timer used for waiting for short periods
+	myLCD_Init();
 
-	myGPIOA_Init();		/* Initialize I/O port PA */
-	myTIM2_Init();		/* Initialize timer TIM2 */
-	myTIM3_Init();		/* Initialize timer TIM3 */
-	myTIM6_Init();		/* Initialize timer TIM6 */
-	myEXTI_Init();		/* Initialize EXTI */
-	myDAC_Init();		/* Initialize DAC */
-	myADC_Init();		/* Initialize ADC */
-	LCD_Init();			/* Initialize LCD */
 
 	while (1)
 	{
-		float resistance_value = getPOTValue();
-		global_resistance = (resistance_value/MAX_ADC_VALUE) * MAX_POT_VALUE;
-		uint32_t control = offsetDAC(resistance_value);
-		DAC->DHR12R1 = control;
+		unsigned int digital = convertAnalogToDigital();
+		global_resistance = calculateResistance(digital);
+		convertDigitalToAnalog(digital);
 	}
+
 	return 0;
 }
 
-/*
- * Configures Port A to the following:
- * 		PA0: Input for ADC from POT
- * 		PA1: Detect edge transitions from NE555
- * 		PA4: Output DAC for timer control voltage
- */
+
 void myGPIOA_Init()
 {
 	/* Enable clock for GPIOA peripheral */
@@ -136,7 +134,6 @@ void myGPIOA_Init()
 	GPIOA->MODER &= ~(GPIO_MODER_MODER4); // Output
 	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR4); // Ensure no pull-up/pull-down
 }
-
 
 void myGPIOB_Init()
 {
@@ -165,116 +162,6 @@ void myGPIOB_Init()
 }
 
 
-/* Frequency Timer */
-void myTIM2_Init()
-{
-	/* Enable clock for TIM2 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
-
-	/* Configure TIM2: buffer auto-reload, count up, stop on overflow,
-	 * enable update events, interrupt on overflow only */
-	TIM2->CR1 = ((uint16_t)0x008C);
-
-	/* Set clock prescaler value */
-	TIM2->PSC = TIM2_PRESCALER;
-
-	/* Set auto-reloaded delay */
-	TIM2->ARR = TIM2_PERIOD;
-
-	/* Update timer registers */
-	TIM2->EGR = ((uint16_t)0x0001);
-
-	/* Assign TIM2 interrupt priority 0 in NVIC */
-	NVIC_SetPriority(TIM2_IRQn, 0);
-
-	/* Enable TIM2 interrupts in NVIC */
-	NVIC_EnableIRQ(TIM2_IRQn);
-
-	/* Enable update interrupt generation */
-	TIM2->DIER |= TIM_DIER_UIE;
-}
-
-
-/* Refresh Display Timer */
-void myTIM3_Init()
-{
-	/* Enable clock for TIM3 peripheral */
-	RCC->APB1ENR |= RCC_APB1RSTR_TIM3RST;
-
-	/* Configure TIM3: buffer auto-reload, count up, stop on overflow,
-	 * enable update events, interrupt on underflow only */
-	TIM3->CR1 &= 0xFFFD;
-	TIM3->CR1 |= 0x9D;
-
-	/* Set clock prescaler value */
-	TIM3->PSC = TIM3_PRESCALER;
-
-	/* Set auto-reload delay*/
-	TIM3->ARR = TIM3_PRESCALER;
-
-	/* Set timer count*/
-	TIM3->CNT = SystemCoreClock / TIM3_PRESCALER;
-
-	/* Update timer registers */
-	TIM3->EGR |= 0x1;
-
-	/* Assign TIM interrupt priority 0 in NVIC */
-	NVIC_SetPriority(TIM3_IRQn, 0);
-
-	/* Enable TIM3 interrupts in NVIC */
-	NVIC_EnableIRQ(TIM3_IRQn);
-
-	/* Enable update interrupt generation */
-	TIM3->DIER |= TIM_DIER_UIE;
-
-	/* Start the timer*/
-	TIM3->CR1 = TIM_CR1_CEN;
-}
-
-
-/* Wait timer */
-void myTIM6_Init()
-{
-	/* Enable clock for TIM6 peripheral */
-	RCC->APB1ENR |= RCC_APB1RSTR_TIM6RST;
-
-	/* Configure TIM6: buffer auto-reload */
-	TIM6->CR1 |= 0x84;
-
-	/* Set clock prescaler value */
-	TIM6->PSC = TIM6_PRESCALER;
-}
-
-
-void myEXTI_Init()
-{
-	/* Map EXTI1 line to PA1 */
-	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PA;
-
-	/* EXTI1 line interrupts: set rising-edge trigger */
-	EXTI->RTSR |= EXTI_RTSR_TR1;
-
-	/* Unmask interrupts from EXTI1 line */
-	EXTI->IMR |= EXTI_IMR_MR1;
-
-	/* Assign EXTI1 interrupt priority = 0 in NVIC */
-	NVIC_SetPriority(EXTI0_1_IRQn, 0);
-
-	/* Enable EXTI1 interrupts in NVIC */
-	NVIC_EnableIRQ(EXTI0_1_IRQn);
-}
-
-
-void myDAC_Init()
-{
-	/* Enable DAC clock */
-	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
-
-	/* Enable DAC */
-	DAC->CR |= DAC_CR_EN1;
-}
-
-
 void myADC_Init()
 {
 	/* Enable ADC clock */
@@ -299,95 +186,230 @@ void myADC_Init()
 	while(!(ADC1->ISR & ADC_ISR_ADRDY));
 }
 
-
-void LCD_Init ()
+void myDAC_Init()
 {
-	/*Setup Port B and SPI*/
-	myGPIOB_Init();
-	mySPI_Init();
+	/* Enable DAC clock */
+	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
 
-	/* 4 Bit Mode */
-	LCD_4_Bit_mode();
-
-	/* Display 2 Lines of 8 characters */
-	writeToLCD(0x28, 1);
-	wait(37);
-
-	/* Disable Cursor */
-	writeToLCD(0x0C, 1);
-	wait(37);
-
-	/* Auto-increment address after access */
-	writeToLCD(0x06, 1);
-	wait(37);
-
-	/* Clear Display */
-	writeToLCD(0x01, 1);
-	wait(1550);
+	/* Enable DAC */
+	DAC->CR |= DAC_CR_EN1;
 }
 
 
-void mySPI_Init ()
+void myTIM2_Init()
 {
-	/* Enable SPI clock */
+	/* Enable clock for TIM2 peripheral */
+	// Relevant register: RCC->APB1ENR
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM2RST;
+
+	/* Configure TIM2: buffer auto-reload, count up, stop on overflow,
+	 * enable update events, interrupt on overflow only */
+	// Relevant register: TIM2->CR1
+	TIM2->CR1 &= 0xFFED;
+	TIM2->CR1 |= 0x8D;
+
+	/* Set clock prescaler value */
+	TIM2->PSC = myTIM2_PRESCALER;
+
+	/* Set auto-reloaded delay */
+	TIM2->ARR = myTIM2_PERIOD;
+
+	/* Update timer registers */
+	// Relevant register: TIM2->EGR
+	TIM2->EGR |= 0x1;
+
+	/* Assign TIM2 interrupt priority = 0 in NVIC */
+	// Relevant register: NVIC->IP[3], or use NVIC_SetPriority
+	NVIC_SetPriority(TIM2_IRQn, 0);
+
+	/* Enable TIM2 interrupts in NVIC */
+	// Relevant register: NVIC->ISER[0], or use NVIC_EnableIRQ
+	NVIC_EnableIRQ(TIM2_IRQn);
+
+	/* Enable update interrupt generation */
+	// Relevant register: TIM2->DIER
+	TIM2->DIER |= TIM_DIER_UIE;
+}
+
+void myTIM3_Init(void)
+{
+	/* Enable clock for TIM3 peripheral */
+	// Relevant register: RCC->APB1ENR
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM3RST;
+
+	/* Configure TIM3: buffer auto-reload, count down, stop on overflow,
+	 * enable update events, interrupt on underflow only */
+	// Relevant register: TIM3->CR1
+	TIM3->CR1 &= 0xFFFD;
+	TIM3->CR1 |= 0x9D;
+
+	/* Set clock prescaler value */
+	//Frequency is 732Hz
+	TIM3->PSC = myTIM3_PRESCALER;
+
+	/* Set auto-reloaded delay */
+	TIM3->ARR = myTIM3_PRESCALER;
+
+	//Should correspond to a value of 1 second
+	TIM3->CNT = SystemCoreClock / myTIM3_PRESCALER;
+
+	/* Update timer registers */
+	// Relevant register: TIM3->EGR
+	TIM3->EGR |= 0x1;
+
+	/* Assign TIM3 interrupt priority = 0 in NVIC */
+	// Relevant register: NVIC->IP[3], or use NVIC_SetPriority
+	NVIC_SetPriority(TIM3_IRQn, 0);
+
+	/* Enable TIM3 interrupts in NVIC */
+	// Relevant register: NVIC->ISER[0], or use NVIC_EnableIRQ
+	NVIC_EnableIRQ(TIM3_IRQn);
+
+	/* Enable update interrupt generation */
+	// Relevant register: TIM3->DIER
+	TIM3->DIER |= TIM_DIER_UIE;
+
+	//Start timer
+	TIM3->CR1 |= 0x1;
+}
+
+void myTIM6_Init()
+{
+	/* Enable clock for TIM6 peripheral */
+	// Relevant register: RCC->APB1ENR
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM6RST;
+
+	/* Configure TIM6: buffer auto-reload,
+	 * enable update events */
+	TIM6->CR1 |= 0x84;
+
+
+	/* Set clock prescaler value */
+	//Frequency is 12MHz
+	TIM6->PSC = myTIM6_PRESCALER;
+}
+
+void wait(int microseconds)
+{
+	//12 cycles with prescaler = 1 microsecond
+	TIM6->ARR = 12 * microseconds;
+
+	//Set count to 0
+	TIM6->CNT = 0;
+
+	//Start timer
+	TIM6->CR1 |= 0x1;
+
+	//Clear status register
+	TIM6->SR = 0;
+
+	//Wait until timer overflows
+	while((TIM6->SR & 0x1) == 0);
+
+	//Stop timer
+	TIM6->CR1 &= 0xFFFE;
+}
+
+void myEXTI_Init()
+{
+	/* Map EXTI1 line to PA1 */
+	//TODO: Use |= instead of =
+	SYSCFG->EXTICR[0] = SYSCFG_EXTICR1_EXTI1_PA;
+
+	/* EXTI1 line interrupts: set rising-edge trigger */
+	// Relevant register: EXTI->RTSR
+	EXTI->RTSR |= EXTI_RTSR_TR1;
+
+	/* Unmask interrupts from EXTI1 line */
+	// Relevant register: EXTI->IMR
+	EXTI->IMR |= EXTI_IMR_MR1;
+
+	/* Assign EXTI1 interrupt priority = 0 in NVIC */
+	// Relevant register: NVIC->IP[1], or use NVIC_SetPriority
+	NVIC_SetPriority(EXTI0_1_IRQn, 0);
+
+	/* Enable EXTI1 interrupts in NVIC */
+	// Relevant register: NVIC->ISER[0], or use NVIC_EnableIRQ
+	NVIC_EnableIRQ(EXTI0_1_IRQn);
+}
+
+void mySPI_Init()
+{
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
 	RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
 
-	/* Configure Pins */
 	GPIO_PinAFConfig(GPIOB, 3, GPIO_AF_0);
 	GPIO_PinAFConfig(GPIOB, 5, GPIO_AF_0);
 
-	/* Configure SPI1 */
-	SPI_InitTypeDef SPI_InitStructInfo;
-	SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructInfo;
+    SPI_InitTypeDef SPI_InitStructInfo;
+    SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructInfo;
+    SPI_InitStruct->SPI_Direction = SPI_Direction_1Line_Tx;
+    SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
+    SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
+    SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
+    SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
+    SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
+    SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
+    SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
+    SPI_InitStruct->SPI_CRCPolynomial = 7;
+    SPI_Init(SPI1, SPI_InitStruct);
 
-	SPI_InitStruct->SPI_Direction = SPI_Direction_1Line_Tx;
-	SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
-	SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
-	SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
-	SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
-	SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
-	SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
-	SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
-	SPI_InitStruct->SPI_CRCPolynomial = 7;
-	SPI_Init(SPI1, SPI_InitStruct);
-
-	SPI_Cmd(SPI1, ENABLE);
+    SPI_Cmd(SPI1, ENABLE);
 }
 
-
-void LCD_4_Bit_mode()
+void myLCD_Init()
 {
-	/* LCD needs delay to display properly */
-	writeToHC595(0x3);
+
+	set4BitLCDMode();
+
+	//2 lines of 8 characters are displayed
+	sendCommandToLCD(0x28); //DL=0, N=1, F=0
+	wait(37);
+
+	//Curser not displayed and is not blinking
+	sendCommandToLCD(0x0C); //D=1, C=0, B=0
+	wait(37);
+
+	//Auto increment DDRAM address after each access
+	sendCommandToLCD(0x06); //I/D=1, S=0
+	wait(37);
+
+	//Clear display
+	sendCommandToLCD(0x01);
 	wait(1520);
-	writeToHC595(0x3 | 0x80);
+}
+
+void set4BitLCDMode()
+{
+	//We have lots of waits to make sure LCD is able to be set to 4 bit mode
+
+	HC595Write(0x3);
 	wait(1520);
-	writeToHC595(0x3);
+	HC595Write(0x3 | 0x80);
+	wait(1520);
+	HC595Write(0x3);
+
+	wait(1520);
+	HC595Write(0x3);
+	wait(1520);
+	HC595Write(0x3 | 0x80);
+	wait(1520);
+	HC595Write(0x3);
 	wait(1520);
 
-	writeToHC595(0x3);
+	HC595Write(0x3);
 	wait(1520);
-	writeToHC595(0x3 | 0x80);
+	HC595Write(0x3 | 0x80);
 	wait(1520);
-	writeToHC595(0x3);
-	wait(1520);
-
-	writeToHC595(0x3);
-	wait(1520);
-	writeToHC595(0x3 | 0x80);
-	wait(1520);
-	writeToHC595(0x3);
+	HC595Write(0x3);
 	wait(1520);
 
-	writeToHC595(0x2);
+	HC595Write(0x2);
 	wait(1520);
-	writeToHC595(0x2 | 0x80);
+	HC595Write(0x2 | 0x80);
 	wait(1520);
-	writeToHC595(0x2);
+	HC595Write(0x2);
 	wait(1520);
-
-
 }
 
 /* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
@@ -399,49 +421,47 @@ void TIM2_IRQHandler()
 		trace_printf("\n*** Overflow! ***\n");
 
 		/* Clear update interrupt flag */
-		TIM2->SR &= ~(TIM_SR_UIF);
+		// Relevant register: TIM2->SR
+		TIM2->SR &= 0xFFFE;
 
 		/* Restart stopped timer */
-		TIM2->CR1 = TIM_CR1_CEN;
+		// Relevant register: TIM2->CR1
+		TIM2->CR1 |= 0x1;
 	}
 }
-
 
 void TIM3_IRQHandler()
 {
 	/* Check if update interrupt flag is indeed set */
 	if ((TIM3->SR & TIM_SR_UIF) != 0)
 	{
-		// Create resistance and frequency strings
-		char frequency[9];
-		char resistance[9];
 
-		// Store char array in strings
-		sprintf(frequency, "F:%4dHz", global_frequency);
-		sprintf(resistance, "R:%4d%c", global_resistance, 0xF4);
+		//Create strings holding resistance and frequency values
+		char frequencyStr[9];
+		char resistanceStr[9];
+		sprintf(frequencyStr, "F:%4dHz", global_frequency);
+		sprintf(resistanceStr, "R:%4d%c", global_resistance, 0xF4);
 
-		trace_printf("%s\n%s", frequency, resistance);
+		//Move cursor to start of first line
+		sendCommandToLCD(0x80);
 
-		// Move cursor to start of line for write
-		writeToLCD(0x80, 1);
+		writeStringToLCD(frequencyStr);
 
-		// Write frequency value
-		writeStringToLCD(frequency);
+		//Move cursor to start of second line
+		sendCommandToLCD(0xC0);
 
-		// Move cursor to second line
-		writeToLCD(0xC0, 1);
-
-		// Write resistance value
-		writeStringToLCD(resistance);
+		writeStringToLCD(resistanceStr);
 
 		/* Clear update interrupt flag */
-		TIM3->SR &= ~(TIM_SR_UIF);
+		// Relevant register: TIM2->SR
+		TIM3->SR &= 0xFFFE;
 
-		/* Set clock count*/
-		TIM3->SR &= SystemCoreClock / TIM3_PRESCALER;
+		//Should correspond to a value of 1 second
+		TIM3->CNT = SystemCoreClock / myTIM3_PRESCALER;
 
 		/* Restart stopped timer */
-		TIM3->CR1 = TIM_CR1_CEN;
+		// Relevant register: TIM2->CR1
+		TIM3->CR1 |= 0x1;
 	}
 }
 
@@ -449,140 +469,124 @@ void TIM3_IRQHandler()
 /* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
 void EXTI0_1_IRQHandler()
 {
+	// Your local variables...
+	static int edgeCounter = 0;
+
 	/* Check if EXTI1 interrupt pending flag is indeed set */
 	if ((EXTI->PR & EXTI_PR_PR1) != 0)
 	{
-		/* Timer is Disabled */
-		if (!(TIM2->CR1 & TIM_CR1_CEN)) {
+		//Even edge
+		if(edgeCounter % 2 == 0) {
 
-			/* Reset current timer count */
-			TIM2->CNT = (uint32_t)0x0;
+			/* Clear the count register */
+			TIM2->CNT = 0;
 
 			/* Start the timer */
-			TIM2->CR1 = TIM_CR1_CEN;
+			TIM2->CR1 |= 0x1;
+		}
+		else {
+			//	- Calculate signal period and frequency.
+			//	- Print calculated values to the console.
+			//	  NOTE: Function trace_printf does not work
+			//	  with floating-point numbers: you must use
+			//	  "unsigned int" type to print your signal
+			//	  period and frequency.
 
-		/* Timer is Enabled*/
-		} else {
+			/* Read out the count register */
+			int count = TIM2->CNT;
 
 			/* Stop the timer */
-			TIM2->CR1 &= ~(TIM_CR1_CEN);
+			TIM2->CR1 &= 0xFFFE;
 
-			/* Read current timer value*/
-			uint32_t count = TIM2->CNT;
+			// Calculate the frequency
+			double signalPeriod = count / (double) SystemCoreClock;
+			global_frequency = (int) (1 / signalPeriod);
 
-			/* Calculate signal frequency and period */
-			global_frequency = ((float)SystemCoreClock) / count;
-
-			if(debug)
-			{
-				trace_printf("Signal Frequency: %.0f Hz\n", global_frequency);
-				trace_printf("Signal Period: %.2f ms\n\n", global_resistance);
-			}
 		}
 
-		/* Clear EXTI1 interrupt pending flag */
+		// 2. Clear EXTI1 interrupt pending flag (EXTI->PR)
 		EXTI->PR |= EXTI_PR_PR1;
+
+		++edgeCounter;
 	}
 }
 
-
-float getPOTValue()
+unsigned int convertAnalogToDigital()
 {
-	/* Start ADC conversion */
+    //Start the analog to digital conversion
 	ADC1->CR |= ADC_CR_ADSTART;
 
-	/* Wait for conversion */
-	while(!(ADC1->ISR & ADC_ISR_EOC));
+	//Wait until conversion finishes
+	while((ADC1->ISR & ADC_ISR_EOC) == 0);
 
-	/* Reset conversion flag */
-	ADC1->ISR &= ~(ADC_ISR_EOC);
+	//Read the result of the conversion
+	return ADC1->DR;
+}
 
-	/* Data mask bit to obtain ADC data */
-	uint32_t value = (ADC1->DR) & ADC_DR_DATA;
+void convertDigitalToAnalog(unsigned int digital)
+{
+	//Clear the right 12 bits
+	DAC->DHR12R1 &= ~DAC_DHR12R1_DACC1DHR;
 
-	return ((float)value);
+	//Set the right 12 bits
+	DAC->DHR12R1 |= digital;
+}
+
+int calculateResistance(unsigned int digital)
+{
+	return (int)((5000.0 / 4095.0) * digital);
 }
 
 
-uint16_t offsetDAC(float value)
+void writeToLCD( char c, int isCommand)
 {
-	/* Map the DAC value to a voltage range */
-	float normalizedDAC = value / MAX_DAC_VALUE;
-	float outputVoltageRange = MAX_VOLTAGE - DIODE_DROP;
-	float outputVoltage = (normalizedDAC * outputVoltageRange) + DIODE_DROP;
+    char RS = isCommand ? 0x00 : 0x40;
+    char EN = 0x80;
 
-	/* Convert voltage back to a DAC level */
-	float normOutputVoltage = outputVoltage / MAX_VOLTAGE;
-	float outputDACValue = normOutputVoltage * MAX_DAC_VALUE;
+    char highNibble = (c & 0xF0) >> 4;
+    char lowNibble = c & 0xF;
 
-	return ((uint16_t) outputDACValue);
-
+    HC595Write(highNibble | RS);
+    HC595Write(highNibble | RS| EN);
+    HC595Write(highNibble | RS);
+    HC595Write(lowNibble | RS);
+    HC595Write(lowNibble | RS | EN);
+    HC595Write(lowNibble | RS);
 }
 
-
-void writeToHC595(char data)
+void writeStringToLCD(char * s)
 {
-	// Force LCK clock to zero
+    int i;
+    for(i = 0; i < strlen(s); ++i)
+    {
+        writeToLCD(s[i], 0);
+    }
+}
+
+void sendCommandToLCD(char c)
+{
+    writeToLCD(c, 1);
+}
+
+void HC595Write(char data)
+{
+    //Based off of example from http://www.ece.uvic.ca/~daler/courses/ceng355/interfacex.pdf
+
+    /* Force your LCK signal to 0 */
 	GPIOB->BRR = GPIO_Pin_4;
 
-	// Wait until SPI is ready
+    /* Wait until SPI1 is ready (TXE = 1 or BSY = 0) */
 	while((SPI1->SR & SPI_SR_BSY) != 0);
 
-	// Send 8 bits of data
-	SPI_SendData8(SPI1, data);
+    /* Assumption: your data holds 8 bits to be sent */
+    SPI_SendData8(SPI1, data);
 
-	// Wait until SPI is not busy
+    /* Wait until SPI1 is not busy (BSY = 0) */
 	while((SPI1->SR & SPI_SR_BSY) != 0);
 
-	// Set LCK clock to zero
+    /* Force your LCK signal to 1 */
 	GPIOB->BSRR = GPIO_Pin_4;
-}
 
-
-
-void writeToLCD(char data, int cmdFlag)
-{
-	/* */
-	char RS = cmdFlag ? 0x00 : 0x40;
-	char EN = 0x80;
-
-	/* Separate 8 bit data into 2 chunks */
-	char high = (data & 0xF0) >> 4;
-	char low = data & 0xF;
-
-	writeToHC595(high | RS);
-	writeToHC595(high | RS | EN);
-	writeToHC595(high | RS);
-	writeToHC595(low | RS);
-	writeToHC595(low | RS | EN);
-	writeToHC595(low | RS);
-}
-
-
-void writeStringToLCD(char* data)
-{
-	int n;
-	// Write one char at a time
-	for(n = 0; n < strlen(data); n++)
-	{
-		writeToLCD(data[n], 0);
-	}
-}
-
-
-void wait(int ms)
-{
-	TIM6->ARR = 12 * ms;
-
-	TIM6->CNT = 0;
-
-	TIM6->CR1 |= 0x1;
-
-	TIM6->SR = 0;
-
-	while((TIM6->SR & 0x1) == 0);
-
-	TIM6->CR1 &= 0xFFFE;
 }
 
 
