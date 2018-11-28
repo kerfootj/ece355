@@ -2,7 +2,7 @@
 // School: 	University of Victoria, Canada.
 // Course: 	ECE 355 "Microprocessor-Based Systems"
 //
-// Version: 1.3.2
+// Version: 1.3.1
 //
 // Author: 	Joel Kerfoot
 // Date:	November 25, 2018
@@ -21,7 +21,6 @@
 /******************************************************************************
  * 									LIBRARIES								  *
  ******************************************************************************/
-
 #include <stdio.h>
 #include "diag/Trace.h"
 #include "cmsis/cmsis_device.h"
@@ -52,10 +51,12 @@
 /* Maximum possible setting for overflow */
 #define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
 
-/* Maximum values for ADC conversion */
+/* ADC and DAC*/
 #define MAX_ADC_VALUE 4095 	// 12 bit ADC holds 0xFFF = 4095
+#define MAX_DAC_VALUE 4095 	// 12 bit DAC holds 0xFFF = 4095
 #define MAX_POT_VALUE 5000 	// 5k potentiometer
-
+#define MAX_VOLTAGE (2.91) 	// Measured when DAC->DHR12R1 = DAC_MAX_VALUE
+#define DIODE_DROP (1.0) 	// Voltage needed to overcome diode voltage
 
 
 /******************************************************************************
@@ -77,9 +78,9 @@ unsigned int convert_analog_to_digital(void);
 void convert_digital_to_analog(unsigned int);
 int calculate_resistance(unsigned int);
 
-void write_to_HC595(char);
 void write_to_LCD(char, int);
 void write_string_to_LCD(char *);
+void write_to_HC595(char);
 void set_LCD_4_bit_mode();
 
 void wait(int);
@@ -89,8 +90,8 @@ void wait(int);
  * 								   GLOBAL VARIABLES							  *
  ******************************************************************************/
 
-int global_frequency = 0;
 int global_resistance = 0;
+int global_frequency = 0;
 
 
 /******************************************************************************
@@ -99,18 +100,21 @@ int global_resistance = 0;
 
 int main(int argc, char* argv[])
 {
-	myGPIOA_Init();     /* Initialize I/O port PA */
-	myGPIOB_Init();     /* Initialize I/O port PB */
-	myTIM2_Init();      /* Initialize frequency timer */
-    myTIM3_Init();      /* Initialize LCD refresh timer */
-	myTIM6_Init();      /* Initialize wait timer */
-	myEXTI_Init();      /* Initialize external interrupts */
-	myADC_Init();       /* Initialize ADC */
-	myDAC_Init();       /* Initialize DAC */
-	mySPI_Init();       /* Initialize SPI */
-	myLCD_Init();       /* Initialize LCD */
 
-	for (;;)
+	/* Start initialization */
+	myGPIOA_Init();
+	myGPIOB_Init();
+	myTIM2_Init();
+	myTIM3_Init();
+	myTIM6_Init();
+	myEXTI_Init();
+	myADC_Init();
+	myDAC_Init();
+	mySPI_Init();
+	myLCD_Init();
+
+	/* Pole ADC */
+	while (1)
 	{
 		unsigned int value = convert_analog_to_digital();
 		global_resistance = calculate_resistance(value);
@@ -118,6 +122,7 @@ int main(int argc, char* argv[])
 	}
 	return 0;
 }
+
 
 /*
  * Configures Port A to the following:
@@ -143,12 +148,7 @@ void myGPIOA_Init()
 	GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR4); // Ensure no pull-up/pull-down
 }
 
-/*
- * Configures Port B to the following:
- * 		PB3: SCK
- * 		PB4: MOSI
- * 		PB5: LCK
- */
+
 void myGPIOB_Init()
 {
 	/* Enable clock for GPIOB peripheral */
@@ -156,7 +156,7 @@ void myGPIOB_Init()
 
 	GPIO_InitTypeDef GPIO_InitStruct;
 
-	/* Configure MOSI and SCK pins PB3, PB5 */
+	/* Configure SCK and MOSI pins PB3, PB5 */
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_5;
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
@@ -213,7 +213,7 @@ void myDAC_Init()
 void myTIM2_Init()
 {
 	/* Enable clock for TIM2 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM2RST;
 
 	/* Configure TIM2: buffer auto-reload, count up, stop on overflow,
 	 * enable update events, interrupt on overflow only */
@@ -238,7 +238,8 @@ void myTIM2_Init()
 	TIM2->DIER |= TIM_DIER_UIE;
 }
 
-void myTIM3_Init()
+
+void myTIM3_Init(void)
 {
 	/* Enable clock for TIM3 peripheral */
 	RCC->APB1ENR |= RCC_APB1RSTR_TIM3RST;
@@ -250,6 +251,9 @@ void myTIM3_Init()
 
 	/* Set clock prescaler value */
 	TIM3->PSC = myTIM3_PRESCALER;
+
+	/* Set auto-reloaded delay */
+	TIM3->ARR = myTIM3_PRESCALER;
 
 	/* Set timer count */
 	TIM3->CNT = SystemCoreClock / myTIM3_PRESCALER;
@@ -267,8 +271,9 @@ void myTIM3_Init()
 	TIM3->DIER |= TIM_DIER_UIE;
 
 	/* Start the timer */
-	TIM3->CR1 = TIM_CR1_CEN;
+	TIM3->CR1 |= TIM_CR1_CEN;
 }
+
 
 void myTIM6_Init()
 {
@@ -301,7 +306,8 @@ void myEXTI_Init()
 	NVIC_EnableIRQ(EXTI0_1_IRQn);
 }
 
-void mySPI_Init ()
+
+void mySPI_Init()
 {
 	/* Enable SPI clock */
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
@@ -313,22 +319,23 @@ void mySPI_Init ()
 
 	/* Configure SPI1 */
 	SPI_InitTypeDef SPI_InitStructInfo;
-    SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructInfo;
+	SPI_InitTypeDef* SPI_InitStruct = &SPI_InitStructInfo;
 
 	SPI_InitStruct->SPI_Direction = SPI_Direction_1Line_Tx;
-    SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
-    SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
-    SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
-    SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
-    SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
-    SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
-    SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
-    SPI_InitStruct->SPI_CRCPolynomial = 7;
+	SPI_InitStruct->SPI_Mode = SPI_Mode_Master;
+	SPI_InitStruct->SPI_DataSize = SPI_DataSize_8b;
+	SPI_InitStruct->SPI_CPOL = SPI_CPOL_Low;
+	SPI_InitStruct->SPI_CPHA = SPI_CPHA_1Edge;
+	SPI_InitStruct->SPI_NSS = SPI_NSS_Soft;
+	SPI_InitStruct->SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
+	SPI_InitStruct->SPI_FirstBit = SPI_FirstBit_MSB;
+	SPI_InitStruct->SPI_CRCPolynomial = 7;
 
 	SPI_Init(SPI1, SPI_InitStruct);
 
 	SPI_Cmd(SPI1, ENABLE);
 }
+
 
 void myLCD_Init()
 {
@@ -336,15 +343,15 @@ void myLCD_Init()
 	set_LCD_4_bit_mode();
 
 	/* Display 2 Lines of 8 characters */
-	write_to_LCD(0x28, 1);
+	write_to_LCD(0x28, 1); //DL=0, N=1, F=0
 	wait(50);
 
 	/* Disable Cursor */
-	write_to_LCD(0x0C, 1);
+	write_to_LCD(0x0C, 1); //D=1, C=0, B=0
 	wait(50);
 
 	/* Auto-increment address after access */
-	write_to_LCD(0x06, 1);
+	write_to_LCD(0x06, 1); //I/D=1, S=0
 	wait(50);
 
 	/* Clear Display */
@@ -354,27 +361,39 @@ void myLCD_Init()
 
 void set_LCD_4_bit_mode()
 {
-	/* Delays added to ensure 4 bit mode is enabled properly */
+	/* Waits added to ensure that 4 bit mode is set correctly */
 
-	int i;
-	for (i = 0; i < 3; i++)
-	{
-		write_to_HC595(0x3);
-		wait(1600);
-		write_to_HC595(0x3 | 0x80);
-		wait(1600);
-		write_to_HC595(0x3);
-		wait(1600);
-	}
+	write_to_HC595(0x3);
+	wait(1520);
+	write_to_HC595(0x3 | 0x80);
+	wait(1520);
+	write_to_HC595(0x3);
+
+	wait(1520);
+	write_to_HC595(0x3);
+	wait(1520);
+	write_to_HC595(0x3 | 0x80);
+	wait(1520);
+	write_to_HC595(0x3);
+	wait(1520);
+
+	write_to_HC595(0x3);
+	wait(1520);
+	write_to_HC595(0x3 | 0x80);
+	wait(1520);
+	write_to_HC595(0x3);
+	wait(1520);
 
 	write_to_HC595(0x2);
-	wait(1600);
+	wait(1520);
 	write_to_HC595(0x2 | 0x80);
-	wait(1600);
+	wait(1520);
 	write_to_HC595(0x2);
-	wait(1600);
+	wait(1520);
 }
 
+
+/* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
 void TIM2_IRQHandler()
 {
 	/* Check if update interrupt flag is indeed set */
@@ -383,12 +402,15 @@ void TIM2_IRQHandler()
 		trace_printf("\n*** Overflow! ***\n");
 
 		/* Clear update interrupt flag */
-		TIM2->SR &= ~(TIM_SR_UIF);
+		// Relevant register: TIM2->SR
+		TIM2->SR &= 0xFFFE;
 
 		/* Restart stopped timer */
-		TIM2->CR1 = TIM_CR1_CEN;
+		// Relevant register: TIM2->CR1
+		TIM2->CR1 |= 0x1;
 	}
 }
+
 
 void TIM3_IRQHandler()
 {
@@ -414,14 +436,15 @@ void TIM3_IRQHandler()
 		TIM3->SR &= ~(TIM_SR_UIF);
 
 		/* Set clock count */
-		TIM3->SR &= SystemCoreClock / myTIM3_PRESCALER;
+		TIM3->CNT = SystemCoreClock / myTIM3_PRESCALER;
 
 		/* Restart stopped timer */
-		TIM3->CR1 = TIM_CR1_CEN;
+		TIM3->CR1 |= 0x1;
 	}
 }
 
 
+/* This handler is declared in system/src/cmsis/vectors_stm32f0xx.c */
 void EXTI0_1_IRQHandler()
 {
 	/* Check if EXTI1 interrupt pending flag is indeed set */
@@ -454,60 +477,58 @@ void EXTI0_1_IRQHandler()
 	}
 }
 
+
 unsigned int convert_analog_to_digital()
 {
-    /* Start ADC conversion */
+    //Start the analog to digital conversion
 	ADC1->CR |= ADC_CR_ADSTART;
 
-	/* Wait for conversion */
+	//Wait until conversion finishes
 	while((ADC1->ISR & ADC_ISR_EOC) == 0);
 
-	/* Return results */
+	//Read the result of the conversion
 	return ADC1->DR;
 }
 
-void convert_digital_to_analog(unsigned int digital)
+
+void convert_digital_to_analog(unsigned int value)
 {
 	//Clear the right 12 bits
 	DAC->DHR12R1 &= ~DAC_DHR12R1_DACC1DHR;
 
 	//Set the right 12 bits
-	DAC->DHR12R1 |= digital;
+	DAC->DHR12R1 |= value;
 }
 
 int calculate_resistance(unsigned int value)
 {
-	return ((MAX_POT_VALUE / MAX_ADC_VALUE) * value);
+	return (int)((5000.0 / 4095.0) * value);
 }
 
 
 void write_string_to_LCD(char * s)
 {
     int i;
-
-    /* Write string 1 char at a time */
     for(i = 0; i < strlen(s); ++i)
     {
         write_to_LCD(s[i], 0);
     }
 }
 
-void write_to_LCD(char c, int cmd)
+
+void write_to_LCD(char c, int cmdFlag)
 {
-    /* Apply offset to non commands */
-    char RS = cmd ? 0x00 : 0x40;
+	/* Apply offset to non commands */
+    char RS = cmdFlag ? 0x00 : 0x40;
     char EN = 0x80;
 
-    /* Separate 8 bit data into 2 chunks */
+    /* Split word into high and low chunks */
     char high = (c & 0xF0) >> 4;
     char low = c & 0xF;
 
-    /* Write the high bits */
     write_to_HC595(high | RS);
     write_to_HC595(high | RS| EN);
     write_to_HC595(high | RS);
-
-    /* Write the low bits */
     write_to_HC595(low | RS);
     write_to_HC595(low | RS | EN);
     write_to_HC595(low | RS);
@@ -516,20 +537,21 @@ void write_to_LCD(char c, int cmd)
 
 void write_to_HC595(char data)
 {
-    /* Force LCK signal to 0 */
+	/* Force LCK signal to 0 */
 	GPIOB->BRR = GPIO_Pin_4;
 
-    /* Wait until SPI1 is ready */
+	/* Wait until SPI1 is ready */
 	while((SPI1->SR & SPI_SR_BSY) != 0);
 
-    /* Send 8 bits of data */
-    SPI_SendData8(SPI1, data);
+	/* Send 8 bits of data */
+	SPI_SendData8(SPI1, data);
 
-    /* Wait until SPI1 is not busy */
+	/* Wait until SPI1 is not busy */
 	while((SPI1->SR & SPI_SR_BSY) != 0);
 
-    /* Force LCK signal to 1 */
+	/* Force LCK signal to 1 */
 	GPIOB->BSRR = GPIO_Pin_4;
+
 }
 
 
