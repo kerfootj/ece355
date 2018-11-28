@@ -2,7 +2,7 @@
 // School: 	University of Victoria, Canada.
 // Course: 	ECE 355 "Microprocessor-Based Systems"
 //
-// Version: 1.3.1
+// Version: 1.3.2
 //
 // Author: 	Joel Kerfoot
 // Date:	November 25, 2018
@@ -80,7 +80,7 @@ int calculate_resistance(unsigned int);
 void write_to_HC595(char);
 void write_to_LCD(char, int);
 void write_string_to_LCD(char *);
-void set_LCD_4_bit_mode()
+void set_LCD_4_bit_mode();
 
 void wait(int);
 
@@ -104,7 +104,7 @@ int main(int argc, char* argv[])
 	myTIM2_Init();      /* Initialize frequency timer */
     myTIM3_Init();      /* Initialize LCD refresh timer */
 	myTIM6_Init();      /* Initialize wait timer */
-	myEXTI_Init();      /* Initialize external interupts */
+	myEXTI_Init();      /* Initialize external interrupts */
 	myADC_Init();       /* Initialize ADC */
 	myDAC_Init();       /* Initialize DAC */
 	mySPI_Init();       /* Initialize SPI */
@@ -241,7 +241,7 @@ void myTIM2_Init()
 void myTIM3_Init()
 {
 	/* Enable clock for TIM3 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM3RST;
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM3RST;
 
 	/* Configure TIM3: buffer auto-reload, count up, stop on overflow,
 	 * enable update events, interrupt on underflow only */
@@ -251,8 +251,8 @@ void myTIM3_Init()
 	/* Set clock prescaler value */
 	TIM3->PSC = myTIM3_PRESCALER;
 
-	/* Set timer coun t*/
-	TIM->CNT = SystemCoreClock / myTIM3_PRESCALER;
+	/* Set timer count */
+	TIM3->CNT = SystemCoreClock / myTIM3_PRESCALER;
 
 	/* Update timer registers */
 	TIM3->EGR |= 0x1;
@@ -273,7 +273,7 @@ void myTIM3_Init()
 void myTIM6_Init()
 {
 	/* Enable clock for TIM6 peripheral */
-	RCC->APB1ENR |= RCC_APB1ENR_TIM6RST;
+	RCC->APB1ENR |= RCC_APB1RSTR_TIM6RST;
 
 	/* Configure TIM6: buffer auto-reload */
 	TIM6->CR1 |= 0x84;
@@ -283,7 +283,7 @@ void myTIM6_Init()
 }
 
 
-void EXTI_Init()
+void myEXTI_Init()
 {
 	/* Map EXTI1 line to PA1 */
 	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PA;
@@ -301,7 +301,7 @@ void EXTI_Init()
 	NVIC_EnableIRQ(EXTI0_1_IRQn);
 }
 
-void SPI_Init ()
+void mySPI_Init ()
 {
 	/* Enable SPI clock */
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
@@ -336,20 +336,20 @@ void myLCD_Init()
 	set_LCD_4_bit_mode();
 
 	/* Display 2 Lines of 8 characters */
-	write_to_LCD(0x28, 1); 
-	wait(37);
+	write_to_LCD(0x28, 1);
+	wait(50);
 
 	/* Disable Cursor */
-	write_to_LCD(0x0C, 1); 
-	wait(37);
+	write_to_LCD(0x0C, 1);
+	wait(50);
 
 	/* Auto-increment address after access */
-	write_to_LCD(0x06, 1); 
-	wait(37);
+	write_to_LCD(0x06, 1);
+	wait(50);
 
 	/* Clear Display */
 	write_to_LCD(0x01, 1);
-	wait(1520);
+	wait(1600);
 }
 
 void set_LCD_4_bit_mode()
@@ -357,22 +357,22 @@ void set_LCD_4_bit_mode()
 	/* Delays added to ensure 4 bit mode is enabled properly */
 
 	int i;
-	for (i = 0; i < 3; i++) 
+	for (i = 0; i < 3; i++)
 	{
-		writeToHC595(0x3);
-		wait(1520);
-		writeToHC595(0x3 | 0x80);
-		wait(1520);
-		writeToHC595(0x3);
-		wait(1520);
+		write_to_HC595(0x3);
+		wait(1600);
+		write_to_HC595(0x3 | 0x80);
+		wait(1600);
+		write_to_HC595(0x3);
+		wait(1600);
 	}
 
 	write_to_HC595(0x2);
-	wait(1520);
+	wait(1600);
 	write_to_HC595(0x2 | 0x80);
-	wait(1520);
+	wait(1600);
 	write_to_HC595(0x2);
-	wait(1520);
+	wait(1600);
 }
 
 void TIM2_IRQHandler()
@@ -396,7 +396,7 @@ void TIM3_IRQHandler()
 	if ((TIM3->SR & TIM_SR_UIF) != 0)
 	{
 
-		/* Create frequency and resistance strings */ 
+		/* Create frequency and resistance strings */
 		char frequency[9];
 		char resistance[9];
 		sprintf(frequency, "F:%4dHz", global_frequency);
@@ -408,7 +408,7 @@ void TIM3_IRQHandler()
 
 		/* Move cursor to start of second line and write resistance */
 		write_to_LCD(0xC0, 1);
-		write_string_to_LCD(resistanceStr);
+		write_string_to_LCD(resistance);
 
 		/* Clear update interrupt flag */
 		TIM3->SR &= ~(TIM_SR_UIF);
@@ -462,7 +462,7 @@ unsigned int convert_analog_to_digital()
 	/* Wait for conversion */
 	while((ADC1->ISR & ADC_ISR_EOC) == 0);
 
-	/* Retrun results */
+	/* Return results */
 	return ADC1->DR;
 }
 
@@ -484,6 +484,8 @@ int calculate_resistance(unsigned int value)
 void write_string_to_LCD(char * s)
 {
     int i;
+
+    /* Write string 1 char at a time */
     for(i = 0; i < strlen(s); ++i)
     {
         write_to_LCD(s[i], 0);
@@ -496,7 +498,7 @@ void write_to_LCD(char c, int cmd)
     char RS = cmd ? 0x00 : 0x40;
     char EN = 0x80;
 
-    /* Serperate 8 bit data into 2 chuncks */
+    /* Separate 8 bit data into 2 chunks */
     char high = (c & 0xF0) >> 4;
     char low = c & 0xF;
 
@@ -507,7 +509,7 @@ void write_to_LCD(char c, int cmd)
 
     /* Write the low bits */
     write_to_HC595(low | RS);
-    write_to_HC595(lowN | RS | EN);
+    write_to_HC595(low | RS | EN);
     write_to_HC595(low | RS);
 }
 
@@ -535,7 +537,7 @@ void wait(int ms)
 {
     /* Set auto reload delay */
 	TIM6->ARR = 12 * ms;
-    
+
     /* Set count */
 	TIM6->CNT = 0;
 
