@@ -2,7 +2,7 @@
 // School: 	University of Victoria, Canada.
 // Course: 	ECE 355 "Microprocessor-Based Systems"
 //
-// Version: 1.3.1t
+// Version: 1.3.1
 //
 // Author: 	Joel Kerfoot
 // Date:	November 25, 2018
